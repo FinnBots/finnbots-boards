@@ -1,0 +1,47 @@
+# Publish the FinnBots leaderboards from the cloud, every 15 minutes, Mac awake or not (2026-11-17).
+# Security review: factory/SECURITY-REVIEW-BOARDS.md. This repo is PUBLIC, so this file and its logs are readable by anyone:
+# no secret value is ever written here or printed by the run (boards_cloud.py prints counts only).
+name: boards
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}          # the owner can run it by hand; forks cannot use this repo's secrets
+permissions:
+  contents: write                # push boards/ + state/ to THIS repo only — no access to any game repo
+concurrency:
+  group: boards                  # one scan at a time: two would read the same checkpoint
+  cancel-in-progress: false
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # v4.2.2, pinned to its commit
+        with:
+          path: boards
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683   # the PRIVATE scanner, read-only deploy key
+        with:
+          repository: FinnBots/finnbots-scanner
+          ssh-key: ${{ secrets.SCANNER_READ_KEY }}
+          path: scanner
+          persist-credentials: false
+      - uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b   # v5.3.0, pinned to its commit
+        with:
+          python-version: "3.12"
+      - name: dependencies (pinned)
+        run: python -m pip install --quiet --disable-pip-version-check base58==2.1.1
+      - name: scan the treasury, publish the boards
+        working-directory: boards
+        run: python boards_cloud.py --scanner ../scanner
+      - name: keep the schedule alive (GitHub stops a schedule after 60 quiet days)
+        working-directory: boards
+        run: |
+          last=$(git log -1 --format=%ct); now=$(date +%s)
+          if [ $(( (now - last) / 86400 )) -ge 30 ]; then date -u +%Y-%m-%dT%H:%MZ > state/heartbeat; fi
+      - name: commit what changed
+        working-directory: boards
+        run: |
+          git add boards state
+          if git diff --cached --quiet; then echo "nothing changed"; exit 0; fi
+          git -c user.name="FinnBots boards" -c user.email="boards@users.noreply.github.com" commit -q -m "Boards: automatic scan"
+          git push -q
