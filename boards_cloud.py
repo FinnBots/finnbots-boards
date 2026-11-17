@@ -81,6 +81,13 @@ def run_scan(scanner, work, log_path):
     return ok, (int(m.group(1)) if m else 0), out
 
 
+def _funds(raw):
+    try:
+        return json.dumps(json.loads(raw).get("funds"), sort_keys=True)
+    except Exception:  # noqa: BLE001 — unreadable = treat as changed
+        return None
+
+
 def harvest(desk, lb, state, out_dir):
     """Carry the board state back to state/ and the public files to boards/. Returns the names of changed boards."""
     os.makedirs(os.path.join(state, "leaderboards"), exist_ok=True)
@@ -96,6 +103,8 @@ def harvest(desk, lb, state, out_dir):
             continue
         src, dst = os.path.join(lb, f), os.path.join(out_dir, f)
         new = open(src, "rb").read()
+        if f == "build_funds.json" and os.path.exists(dst) and _funds(new) == _funds(open(dst, "rb").read()):
+            continue                  # the scanner restamps "updated" every run: publish only when the TOTALS change
         if not os.path.exists(dst) or open(dst, "rb").read() != new:
             changed.append(f)
             with open(dst, "wb") as g:
@@ -144,7 +153,8 @@ def self_test(scanner):
             "    open(os.path.join(D, 'pending_earn.csv'), 'w').write('x')\n"
             "    open(os.path.join(L, 'leaderboard_bwrd.csv'), 'w').write('rank,wallet\\n1,W\\n')\n"
             "    open(os.path.join(L, 'bwrd_entries_index.csv'), 'w').write('sig_prefix\\n')\n"
-            "    open(os.path.join(L, 'cabinet_names.csv'), 'w').write('season,wallet,name\\n')\n")
+            "    open(os.path.join(L, 'cabinet_names.csv'), 'w').write('season,wallet,name\\n')\n"
+            "    import time; open(os.path.join(L, 'build_funds.json'), 'w').write('{\"updated\": \"%s\", \"funds\": [1]}' % time.time())\n")
         def fresh():
             st, ob = os.path.join(root, "state"), os.path.join(root, "boards")
             shutil.rmtree(st, ignore_errors=True); shutil.rmtree(ob, ignore_errors=True)
@@ -163,7 +173,7 @@ def self_test(scanner):
             return rc, out.getvalue(), st, ob
         rc, out, st, ob = go("ok")
         t("a clean scan carries the checkpoint forward", open(os.path.join(st, "checkpoint_treasury_prod.txt")).read() == "SIGNEW")
-        t("the boards and the cabinet names are published", sorted(os.listdir(ob)) == ["cabinet_names.csv", "leaderboard_bwrd.csv"])
+        t("the boards, the cabinet names and the fund totals are published", sorted(os.listdir(ob)) == ["build_funds.json", "cabinet_names.csv", "leaderboard_bwrd.csv"])
         t("the entry index is kept as STATE, never published", os.path.exists(os.path.join(st, "leaderboards", "bwrd_entries_index.csv")) and "bwrd_entries_index.csv" not in os.listdir(ob))
         allfiles = [os.path.basename(p) for p in glob.glob(os.path.join(root, "**", "*"), recursive=True)]
         t("prize / earn pending files are NEVER kept or published", "pending_prizes.csv" not in allfiles and "pending_earn.csv" not in allfiles)
@@ -173,8 +183,13 @@ def self_test(scanner):
             t(f"{label} writes NOTHING and exits 1 — and its error text is not printed",
               rc == 1 and open(os.path.join(st, "checkpoint_treasury_prod.txt")).read() == "SIGOLD" and not os.path.exists(ob) and "SECRETWALLET" not in out)
         rc, out, st, ob = go("ok")
-        rc2 = one_run(fake, st, ob)
-        t("a second run with nothing new changes no published file", rc2 == 0)
+        before = {f: open(os.path.join(ob, f), "rb").read() for f in os.listdir(ob)}
+        out2 = io.StringIO()
+        with contextlib.redirect_stdout(out2):
+            rc2 = one_run(fake, st, ob)
+        after = {f: open(os.path.join(ob, f), "rb").read() for f in os.listdir(ob)}
+        t("a second run with nothing new changes no published file — not even the fund totals' timestamp",
+          rc2 == 0 and before == after and "0 published file(s) changed" in out2.getvalue())
     finally:
         os.environ.pop("FAKE_MODE", None)
         shutil.rmtree(root, ignore_errors=True)
