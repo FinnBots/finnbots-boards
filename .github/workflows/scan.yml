@@ -4,7 +4,7 @@
 name: boards
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "7,22,37,52 * * * *"   # off the busy :00/:15 slots GitHub most often delays or drops (2026-11-18: one run all night)
   workflow_dispatch: {}          # the owner can run it by hand; forks cannot use this repo's secrets
 permissions:
   contents: write                # push boards/ + state/ to THIS repo only — no access to any game repo
