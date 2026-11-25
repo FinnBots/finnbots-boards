@@ -14,7 +14,7 @@ WHERE: a scratch HOME, so every ~/Desktop path the scanner uses lands in a throw
 WHAT IS KEPT: the treasury checkpoint + the leaderboards folder (boards, entry indexes, the names and fund ledgers) —
 all public chain data. WHAT IS THROWN AWAY: every other file the scan writes (prize / spot / earn pending files and
 their indexes): they are never committed, never published, never read by a payout. The Mac keeps the money.
-WHAT IS PUBLISHED: boards/ = leaderboard_*.csv, cabinet_names.csv, build_funds.json.
+WHAT IS PUBLISHED: boards/ = leaderboard_*.csv, holders_*.csv (each holder's FREE runs, 2026-11-25), cabinet_names.csv, build_funds.json.
 WHAT IS PRINTED: counts only. The scan's own output (wallets, signatures, memos) goes to a file in the scratch folder
 that is deleted, because this runs in a PUBLIC repo whose logs anyone can read.
 A FAILED scan changes nothing: state/ and boards/ are only replaced after run_scan() returns cleanly.
@@ -22,7 +22,7 @@ Exit: 0 ok (changed or not) · 1 the scan failed (nothing written) · 2 usage.
 """
 import contextlib, glob, io, json, os, re, shutil, sys, tempfile
 
-PUBLISHED = re.compile(r"^(leaderboard_[a-z0-9]+\.csv|cabinet_names\.csv|build_funds\.json)$")
+PUBLISHED = re.compile(r"^(leaderboard_[a-z0-9]+\.csv|holders_[a-z0-9]+\.csv|cabinet_names\.csv|build_funds\.json)$")   # holders_: free holder runs (2026-11-25)
 KEEP_DESKTOP = ("checkpoint_treasury_prod.txt",)          # treasury phase: the ONLY Desktop file it carries between runs
 # THE FAUCET EARN BOARDS (2026-11-17; Founder: "fix the earn boards"): Flappy Bot + Pipeline rank faucet claims from
 # earn_claims_index.csv, which the earn scan writes on the Desktop. Carried: the faucet checkpoints + that index (it IS the
@@ -190,6 +190,7 @@ def self_test(scanner):
             "    open(os.path.join(L, 'leaderboard_bwrd.csv'), 'w').write('rank,wallet\\n1,W\\n')\n"
             "    open(os.path.join(L, 'bwrd_entries_index.csv'), 'w').write('sig_prefix\\n')\n"
             "    open(os.path.join(L, 'cabinet_names.csv'), 'w').write('season,wallet,name\\n')\n"
+            "    open(os.path.join(L, 'holders_bwrd.csv'), 'w').write('entry_day,wallet\\n')\n"
             "    import time; open(os.path.join(L, 'build_funds.json'), 'w').write('{\"updated\": \"%s\", \"funds\": [1]}' % time.time())\n"
             "def run_earn_scan():\n"
             "    if os.environ.get('FAKE_EARN') == 'raise': raise RuntimeError('faucet rpc 9xSECRETWALLETxx')\n"
@@ -225,7 +226,7 @@ def self_test(scanner):
           and not os.path.exists(os.path.join(st_e, "checkpoint_faucet_prod.txt")) and "SECRETWALLET" not in out_e and "held" in out_e)
         rc, out, st, ob = go("ok")
         t("a clean scan carries the checkpoint forward", open(os.path.join(st, "checkpoint_treasury_prod.txt")).read() == "SIGNEW")
-        t("the boards, the cabinet names, the fund totals and the earn board are published", sorted(os.listdir(ob)) == ["build_funds.json", "cabinet_names.csv", "earn_claims_index.csv", "leaderboard_bwrd.csv"])
+        t("the boards, the cabinet names, the fund totals and the earn board are published", sorted(os.listdir(ob)) == ["build_funds.json", "cabinet_names.csv", "earn_claims_index.csv", "holders_bwrd.csv", "leaderboard_bwrd.csv"])
         t("the entry index is kept as STATE, never published", os.path.exists(os.path.join(st, "leaderboards", "bwrd_entries_index.csv")) and "bwrd_entries_index.csv" not in os.listdir(ob))
         allfiles = [os.path.basename(p) for p in glob.glob(os.path.join(root, "**", "*"), recursive=True)]
         t("prize / earn pending files are NEVER kept or published", "pending_prizes.csv" not in allfiles and "pending_earn.csv" not in allfiles)
